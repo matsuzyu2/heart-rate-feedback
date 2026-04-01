@@ -1,22 +1,8 @@
-"""
-フィードバックモジュール
-音声フィードバックとフィードバックモードの統合
-"""
-from .audio_feedback import AudioFeedback, AudioFeedbackError
-from .feedback_modes import (
-    FeedbackMode,
-    IncreaseRewardMode,
-    DecreaseRewardMode,
-    RandomMode,
-    AudioFeedbackProtocol
-)
+"""Legacy feedback package kept during migration.
 
-__all__ = [
-    'AudioFeedback',
-    'AudioFeedbackError',
-    'FeedbackMode',
-    'IncreaseRewardMode',
-    'DecreaseRewardMode', 
-    'RandomMode',
-    'AudioFeedbackProtocol'
-]
+Audio feedback has been removed from the rebuilt scope.
+"""
+
+from .visual_feedback_gui import VisualFeedbackGUI
+
+__all__ = ["VisualFeedbackGUI"]

@@ -4,7 +4,7 @@
 #                   Polarに関する設定
 # =============================================================================
 # Polarデバイス設定
-ECG_POLAR_DEVICE_ID = "D1948025" # Polar H10のデバイスID（例: D1948025）をそのまま記載
+ECG_POLAR_DEVICE_ID = "D30E9029" # Polar H10のデバイスID（例: D1948025）をそのまま記載
 
 # ECG Service UUID（Polar独自）
 ECG_SERVICE_UUID = "fb005c80-02e7-f387-1cad-8acd2d8df0c8"
@@ -81,3 +81,16 @@ LSL_TRIGGER_SESSION_STOP = 200      # セッション終了
 LSL_TRIGGER_FEEDBACK_HIGH = 1000  # 心拍数上昇フィードバック
 LSL_TRIGGER_FEEDBACK_LOW = 2000  # 心拍数下降フィードバック
 
+# =============================================================================
+#                   視覚 FB / 金銭的報酬 設定
+# =============================================================================
+VISUAL_REWARD_LOG_DIRECTORY = "logs/visual_reward"
+
+# 報酬レート（円/秒）: 基準 HR 達成中に 1 ブロック（5 秒）で加算される額
+# = REWARD_RATE_YEN_PER_SEC × HR_BLOCK_WINDOW_SECONDS = 5.0 円/ブロック（デフォルト）
+REWARD_RATE_YEN_PER_SEC = 1.0
+
+# シェイピング設定
+SHAPING_STEP_BPM = 2.0         # 基準 HR の増減幅（BPM）
+SHAPING_UPPER_THRESHOLD = 0.70  # 将来の IBI 単位シェイピング用（現在は未使用）
+SHAPING_LOWER_THRESHOLD = 0.30  # 将来の IBI 単位シェイピング用（現在は未使用）

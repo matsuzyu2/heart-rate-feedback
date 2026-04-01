@@ -140,3 +140,6 @@ References/
 
 # Log files
 *.log
+
+# md files
+*.md

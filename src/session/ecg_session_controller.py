@@ -77,6 +77,9 @@ class ECGSessionController:
         # フィードバックタイマー用のタスク
         self._feedback_task: Optional[asyncio.Task] = None
         
+        # HR表示更新用のタスク（視覚FBモード用、200ms間隔）
+        self._hr_display_task: Optional[asyncio.Task] = None
+        
         # セッション自動終了タイマー用のタスク
         self._session_timer_task: Optional[asyncio.Task] = None
         
@@ -140,13 +143,18 @@ class ECGSessionController:
         if not await self._initialize_components():
             return False
         
+        # is_runningフラグを先に設定（create_taskで即座にループが実行される場合に備える）
+        self.is_running = True
+        
         # フィードバックタイマーの開始
         self._feedback_task = asyncio.create_task(self._feedback_timer_loop())
+        
+        # HR表示更新ループの開始（200ms間隔、視覚FBモード用）
+        self._hr_display_task = asyncio.create_task(self._hr_display_loop())
         
         # セッション自動終了タイマーの開始
         self._session_timer_task = asyncio.create_task(self._session_timer())
         
-        self.is_running = True
         logger.info("ECG session started successfully")
         return True
     
@@ -172,6 +180,15 @@ class ECGSessionController:
                 pass
             self._feedback_task = None
         
+        # HR表示更新ループの停止
+        if self._hr_display_task:
+            self._hr_display_task.cancel()
+            try:
+                await self._hr_display_task
+            except asyncio.CancelledError:
+                pass
+            self._hr_display_task = None
+        
         # セッション自動終了タイマーの停止
         if self._session_timer_task:
             self._session_timer_task.cancel()
@@ -180,6 +197,9 @@ class ECGSessionController:
             except asyncio.CancelledError:
                 pass
             self._session_timer_task = None
+        
+        # セッション終了フック（OCP準拠: 型チェックなし）
+        self.feedback_mode.on_session_end()
         
         # ログ機能の終了
         if self.beat_logger:
@@ -285,7 +305,7 @@ class ECGSessionController:
             # pygame.mixerをここで初期化することで、COMスレッドモデルの競合を回避
             try:
                 # AudioFeedbackにCognioトリガーとActiChampトリガーを設定
-                if hasattr(self.feedback_mode, 'audio_feedback'):
+                if self.feedback_mode.audio_feedback is not None:
                     if self.cognio_trigger:
                         self.feedback_mode.audio_feedback.cognio_trigger = self.cognio_trigger
                         logger.info("CognioTrigger assigned to AudioFeedback for sound event triggers")
@@ -366,6 +386,23 @@ class ECGSessionController:
                     
                 except Exception as e:
                     logger.error(f"Error in feedback timer: {e}")
+    
+    async def _hr_display_loop(self) -> None:
+        """
+        200msごとに最新の瞬間心拍数を取得し、feedback_mode.on_hr_update()を呼ぶ。
+        on_hr_update()のデフォルト実装は何もしないため、
+        既存の聴覚FBモードには影響しない。
+        """
+        while self.is_running:
+            await asyncio.sleep(0.2)
+            if self.is_running and self.ecg_processor:
+                try:
+                    hr_data = self.ecg_processor.get_instantaneous_hr_data()
+                    if hr_data:
+                        _, latest_hr_bpm = hr_data[-1]
+                        self.feedback_mode.on_hr_update(latest_hr_bpm)
+                except Exception as e:
+                    logger.error(f"_hr_display_loop でエラー: {e}")
     
     async def _session_timer(self) -> None:
         """

@@ -1,8 +1,2 @@
-"""
-セッション制御モジュール
-"""
-from .ecg_session_controller import ECGSessionController
+"""Session management package for rebuilt architecture."""
 
-__all__ = [
-    "ECGSessionController",
-]

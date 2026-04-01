@@ -1,0 +1,38 @@
+[app]
+data_dir = "data"
+polar_device_id = "D1948025"
+
+[processing]
+sampling_rate_hz = 130
+bandpass_low_hz = 0.5
+bandpass_high_hz = 40.0
+refractory_period_ms = 180
+trend_threshold_bpm = 1.0
+rr_outlier_threshold_bpm = 10.0
+
+[timing]
+rest_seconds = 120
+hrfb_seconds = 900
+break_seconds = 120
+feedback_interval_seconds = 5.0
+
+[trigger]
+actichamp_code = 1
+cognionics_code = 100
+reset_pulse_seconds = 0.02
+
+[devices.actichamp]
+enabled = false
+serial_port = "COM4"
+serial_baudrate = 2000000
+
+[devices.cognionics]
+enabled = false
+zmq_address = "tcp://127.0.0.1:50000"
+serial_port = "COM10"
+serial_baudrate = 9600
+
+[devices.lsl]
+enabled = false
+stream_name = "HRFB_Markers"
+source_id = "hrfb_marker"
