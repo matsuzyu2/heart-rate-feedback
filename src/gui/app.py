@@ -13,11 +13,13 @@ from src.gui.experiment_flow import build_phase_plan
 from src.gui.experimenter_panel import ExperimenterPanel
 from src.gui.feedback_display import FeedbackDisplay
 from src.gui.participant_form import Group, ParticipantInput, validate_participant_id
+from src.logging.session_logger import SessionLogger
 from src.logging.trigger_logger import TriggerLogger
 from src.sensor.trigger.actichamp import ActiChampTrigger
 from src.sensor.trigger.base import TriggerDevice, TriggerDispatcher
 from src.sensor.trigger.cognionics import CognionicsTrigger
 from src.sensor.trigger.lsl import LSLTrigger
+from src.session.ecg_runner import EcgRunner
 from src.session.session_manager import SessionManager
 
 
@@ -50,6 +52,7 @@ class HRFBApp:
         self._active_session_number: int | None = None
         self._session_started_mono: float | None = None
         self._trigger_dispatcher: TriggerDispatcher | None = None
+        self._ecg_runner: EcgRunner | None = None
 
         self._build_form()
         self._build_status()
@@ -148,6 +151,18 @@ class HRFBApp:
             session_number=model.session_number,
         )
 
+        session_dir = self.session_manager.get_session_dir(
+            model.participant_id, model.session_number
+        )
+        session_logger = SessionLogger(session_dir)
+        self._ecg_runner = EcgRunner(
+            settings=self.settings,
+            session_logger=session_logger,
+            trigger_dispatcher=self._trigger_dispatcher,
+        )
+        self._ecg_runner.start()
+        self.root.after(100, self._poll_ecg)
+
         self.state.running = True
         self.state.phase_index = 0
         self.state.elapsed_seconds = 0
@@ -164,14 +179,19 @@ class HRFBApp:
         self._tick()
 
     def stop_session(self) -> None:
-        """Stop local timer loop."""
+        """Stop local timer loop and ECG runner."""
+        clock_sync: dict | None = None
+        if self._ecg_runner is not None:
+            self._ecg_runner.stop()
+            clock_sync = self._ecg_runner.clock_sync
+            self._ecg_runner = None
         if self.state.running:
             self._end_current_phase()
             self._emit_trigger(
                 trigger_value=self.settings.trigger.session_end_code,
                 annotation="session_end",
             )
-            self._finalize_session_meta()
+            self._finalize_session_meta(clock_sync=clock_sync)
         self.state.running = False
 
     def skip_phase(self) -> None:
@@ -187,7 +207,12 @@ class HRFBApp:
             self.state.running = False
             self.phase_label.configure(text="Phase: completed")
             self.timer_label.configure(text="Remaining: 00:00")
-            self._finalize_session_meta()
+            clock_sync: dict | None = None
+            if self._ecg_runner is not None:
+                self._ecg_runner.stop()
+                clock_sync = self._ecg_runner.clock_sync
+                self._ecg_runner = None
+            self._finalize_session_meta(clock_sync=clock_sync)
             return
         self.state.phase_remaining = self._phase_plan[self.state.phase_index].duration_seconds
         self._begin_current_phase()
@@ -240,14 +265,33 @@ class HRFBApp:
         except ValueError:
             return
 
-    def _finalize_session_meta(self) -> None:
+    def _finalize_session_meta(self, clock_sync: dict | None = None) -> None:
+        """Write session finalisation metadata.
+
+        Args:
+            clock_sync: Optional clock synchronisation dict from
+                :class:`~src.session.ecg_runner.EcgRunner`.
+        """
         if self._active_participant_id is None or self._active_session_number is None:
             return
         self.session_manager.finalize_session(
             participant_id=self._active_participant_id,
             session_number=self._active_session_number,
-            clock_sync={},
+            clock_sync=clock_sync or {},
         )
+
+    def _poll_ecg(self) -> None:
+        """Poll ECG runner for the latest HR and update feedback display.
+
+        Reschedules itself every 100 ms while the session is running.
+        """
+        if not self.state.running:
+            return
+        if self._ecg_runner is not None:
+            hr = self._ecg_runner.latest_hr
+            if hr is not None:
+                self.feedback_display.set_hr(hr)
+        self.root.after(100, self._poll_ecg)
 
     def _setup_trigger_dispatcher(self, participant_id: str, session_number: int) -> None:
         session_dir = self.session_manager.get_session_dir(participant_id, session_number)

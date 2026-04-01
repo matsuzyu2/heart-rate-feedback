@@ -20,6 +20,10 @@ feedback_interval_seconds = 5.0
 actichamp_code = 1
 cognionics_code = 100
 reset_pulse_seconds = 0.02
+session_start_code = 10
+session_end_code = 11
+phase_start_code = 12
+phase_end_code = 13
 
 [devices.actichamp]
 enabled = false
