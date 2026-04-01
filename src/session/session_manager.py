@@ -75,17 +75,65 @@ class SessionManager:
         payload["phases"].append(phase)
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
 
+    def begin_phase(
+        self,
+        participant_id: str,
+        session_number: int,
+        phase_name: str,
+        started_elapsed_sec: float,
+        condition: str | None = None,
+    ) -> None:
+        """Append a started phase entry into session_meta.json."""
+        phase_payload: dict[str, Any] = {
+            "phase": phase_name,
+            "started_at": _now_iso(),
+            "ended_at": None,
+            "started_elapsed_sec": round(started_elapsed_sec, 3),
+            "ended_elapsed_sec": None,
+        }
+        if condition is not None:
+            phase_payload["condition"] = condition
+        self.append_phase_record(
+            participant_id=participant_id,
+            session_number=session_number,
+            phase=phase_payload,
+        )
+
+    def end_phase(
+        self,
+        participant_id: str,
+        session_number: int,
+        phase_name: str,
+        ended_elapsed_sec: float,
+    ) -> None:
+        """Mark the latest open phase record as ended."""
+        path = self._session_dir(participant_id, session_number) / "session_meta.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        phases = list(payload.get("phases", []))
+
+        for record in reversed(phases):
+            if record.get("phase") == phase_name and record.get("ended_at") is None:
+                record["ended_at"] = _now_iso()
+                record["ended_elapsed_sec"] = round(ended_elapsed_sec, 3)
+                path.write_text(
+                    json.dumps(payload, indent=2, ensure_ascii=True),
+                    encoding="utf-8",
+                )
+                return
+
+        raise ValueError(f"No open phase found for {phase_name}")
+
     def finalize_session(
         self,
         participant_id: str,
         session_number: int,
-        clock_sync: dict[str, int | str],
+        clock_sync: dict[str, int | str] | None = None,
     ) -> None:
         """Finalize session metadata and participant completed list."""
         session_path = self._session_dir(participant_id, session_number) / "session_meta.json"
         payload = json.loads(session_path.read_text(encoding="utf-8"))
         payload["ended_at"] = _now_iso()
-        payload["clock_sync"] = clock_sync
+        payload["clock_sync"] = clock_sync or {}
         session_path.write_text(
             json.dumps(payload, indent=2, ensure_ascii=True),
             encoding="utf-8",
@@ -122,6 +170,10 @@ class SessionManager:
                 }
             )
         return rows
+
+    def get_session_dir(self, participant_id: str, session_number: int) -> Path:
+        """Return concrete directory for one participant session."""
+        return self._session_dir(participant_id, session_number)
 
     def _participant_path(self, participant_id: str) -> Path:
         return self.data_dir / participant_id / "participant.json"

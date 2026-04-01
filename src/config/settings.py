@@ -8,9 +8,12 @@ from typing import Any
 import tomllib
 
 from src.config.defaults import (
+    ActiChampDeviceDefaults,
+    CognionicsDeviceDefaults,
     DEFAULT_CONFIG_PATH,
     DEFAULT_DATA_DIR,
     DEFAULT_POLAR_DEVICE_ID,
+    LSLDeviceDefaults,
     ProcessingDefaults,
     TimingDefaults,
     TriggerDefaults,
@@ -26,6 +29,9 @@ class AppSettings:
     processing: ProcessingDefaults
     timing: TimingDefaults
     trigger: TriggerDefaults
+    actichamp: ActiChampDeviceDefaults
+    cognionics: CognionicsDeviceDefaults
+    lsl: LSLDeviceDefaults
 
 
 def _section(cfg: dict[str, Any], key: str) -> dict[str, Any]:
@@ -53,6 +59,10 @@ def load_settings(config_path: Path | None = None) -> AppSettings:
     processing = _section(parsed, "processing")
     timing = _section(parsed, "timing")
     trigger = _section(parsed, "trigger")
+    devices = _section(parsed, "devices")
+    actichamp = _section(devices, "actichamp")
+    cognionics = _section(devices, "cognionics")
+    lsl = _section(devices, "lsl")
 
     return AppSettings(
         data_dir=Path(str(app.get("data_dir", DEFAULT_DATA_DIR))),
@@ -79,5 +89,25 @@ def load_settings(config_path: Path | None = None) -> AppSettings:
             actichamp_code=int(trigger.get("actichamp_code", 1)),
             cognionics_code=int(trigger.get("cognionics_code", 100)),
             reset_pulse_seconds=float(trigger.get("reset_pulse_seconds", 0.02)),
+            session_start_code=int(trigger.get("session_start_code", 10)),
+            session_end_code=int(trigger.get("session_end_code", 11)),
+            phase_start_code=int(trigger.get("phase_start_code", 12)),
+            phase_end_code=int(trigger.get("phase_end_code", 13)),
+        ),
+        actichamp=ActiChampDeviceDefaults(
+            enabled=bool(actichamp.get("enabled", False)),
+            serial_port=str(actichamp.get("serial_port", "COM4")),
+            serial_baudrate=int(actichamp.get("serial_baudrate", 2000000)),
+        ),
+        cognionics=CognionicsDeviceDefaults(
+            enabled=bool(cognionics.get("enabled", False)),
+            zmq_address=str(cognionics.get("zmq_address", "tcp://127.0.0.1:50000")),
+            serial_port=str(cognionics.get("serial_port", "COM10")),
+            serial_baudrate=int(cognionics.get("serial_baudrate", 9600)),
+        ),
+        lsl=LSLDeviceDefaults(
+            enabled=bool(lsl.get("enabled", False)),
+            stream_name=str(lsl.get("stream_name", "HRFB_Markers")),
+            source_id=str(lsl.get("source_id", "hrfb_marker")),
         ),
     )

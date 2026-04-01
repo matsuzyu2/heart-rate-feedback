@@ -35,6 +35,38 @@ class TriggerDefaults:
     actichamp_code: int = 1
     cognionics_code: int = 100
     reset_pulse_seconds: float = 0.02
+    session_start_code: int = 10
+    session_end_code: int = 11
+    phase_start_code: int = 12
+    phase_end_code: int = 13
+
+
+@dataclass(frozen=True)
+class ActiChampDeviceDefaults:
+    """ActiChamp device defaults."""
+
+    enabled: bool = False
+    serial_port: str = "COM4"
+    serial_baudrate: int = 2000000
+
+
+@dataclass(frozen=True)
+class CognionicsDeviceDefaults:
+    """Cognionics device defaults."""
+
+    enabled: bool = False
+    zmq_address: str = "tcp://127.0.0.1:50000"
+    serial_port: str = "COM10"
+    serial_baudrate: int = 9600
+
+
+@dataclass(frozen=True)
+class LSLDeviceDefaults:
+    """LSL device defaults."""
+
+    enabled: bool = False
+    stream_name: str = "HRFB_Markers"
+    source_id: str = "hrfb_marker"
 
 
 DEFAULT_DATA_DIR = Path("data")

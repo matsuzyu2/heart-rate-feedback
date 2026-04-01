@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+import time
 import tkinter as tk
 from tkinter import messagebox
 
@@ -11,6 +13,11 @@ from src.gui.experiment_flow import build_phase_plan
 from src.gui.experimenter_panel import ExperimenterPanel
 from src.gui.feedback_display import FeedbackDisplay
 from src.gui.participant_form import Group, ParticipantInput, validate_participant_id
+from src.logging.trigger_logger import TriggerLogger
+from src.sensor.trigger.actichamp import ActiChampTrigger
+from src.sensor.trigger.base import TriggerDevice, TriggerDispatcher
+from src.sensor.trigger.cognionics import CognionicsTrigger
+from src.sensor.trigger.lsl import LSLTrigger
 from src.session.session_manager import SessionManager
 
 
@@ -21,6 +28,7 @@ class AppState:
     running: bool = False
     phase_index: int = 0
     phase_remaining: int = 0
+    elapsed_seconds: int = 0
 
 
 class HRFBApp:
@@ -38,6 +46,10 @@ class HRFBApp:
         self.feedback_display = FeedbackDisplay(self.root)
         self.state = AppState()
         self._phase_plan = []
+        self._active_participant_id: str | None = None
+        self._active_session_number: int | None = None
+        self._session_started_mono: float | None = None
+        self._trigger_dispatcher: TriggerDispatcher | None = None
 
         self._build_form()
         self._build_status()
@@ -120,14 +132,46 @@ class HRFBApp:
             break_seconds=self.settings.timing.break_seconds,
         )
 
+        condition_order = [
+            p.condition.value
+            for p in self._phase_plan
+            if p.condition is not None
+        ]
+        self.session_manager.create_session_meta(
+            participant_id=model.participant_id,
+            session_number=model.session_number,
+            condition_order=condition_order,
+            polar_device_id=self.settings.polar_device_id,
+        )
+        self._setup_trigger_dispatcher(
+            participant_id=model.participant_id,
+            session_number=model.session_number,
+        )
+
         self.state.running = True
         self.state.phase_index = 0
+        self.state.elapsed_seconds = 0
         self.state.phase_remaining = self._phase_plan[0].duration_seconds
+        self._active_participant_id = model.participant_id
+        self._active_session_number = model.session_number
+        self._session_started_mono = time.monotonic()
+        self._begin_current_phase()
+        self._emit_trigger(
+            trigger_value=self.settings.trigger.session_start_code,
+            annotation="session_start",
+        )
         self._refresh_view()
         self._tick()
 
     def stop_session(self) -> None:
         """Stop local timer loop."""
+        if self.state.running:
+            self._end_current_phase()
+            self._emit_trigger(
+                trigger_value=self.settings.trigger.session_end_code,
+                annotation="session_end",
+            )
+            self._finalize_session_meta()
         self.state.running = False
 
     def skip_phase(self) -> None:
@@ -137,23 +181,118 @@ class HRFBApp:
         self._advance_phase()
 
     def _advance_phase(self) -> None:
+        self._end_current_phase()
         self.state.phase_index += 1
         if self.state.phase_index >= len(self._phase_plan):
             self.state.running = False
             self.phase_label.configure(text="Phase: completed")
             self.timer_label.configure(text="Remaining: 00:00")
+            self._finalize_session_meta()
             return
         self.state.phase_remaining = self._phase_plan[self.state.phase_index].duration_seconds
+        self._begin_current_phase()
         self._refresh_view()
 
     def _tick(self) -> None:
         if not self.state.running:
             return
         self.state.phase_remaining -= 1
+        self.state.elapsed_seconds += 1
         if self.state.phase_remaining <= 0:
             self._advance_phase()
         self._refresh_view()
         self.root.after(1000, self._tick)
+
+    def _begin_current_phase(self) -> None:
+        if self._active_participant_id is None or self._active_session_number is None:
+            return
+        current = self._phase_plan[self.state.phase_index]
+        self.session_manager.begin_phase(
+            participant_id=self._active_participant_id,
+            session_number=self._active_session_number,
+            phase_name=current.name.value,
+            started_elapsed_sec=float(self.state.elapsed_seconds),
+            condition=current.condition.value if current.condition is not None else None,
+        )
+        self._emit_trigger(
+            trigger_value=self.settings.trigger.phase_start_code,
+            annotation=f"phase_{current.name.value}_start",
+        )
+
+    def _end_current_phase(self) -> None:
+        if self._active_participant_id is None or self._active_session_number is None:
+            return
+        if not self._phase_plan:
+            return
+        idx = min(self.state.phase_index, len(self._phase_plan) - 1)
+        current = self._phase_plan[idx]
+        try:
+            self.session_manager.end_phase(
+                participant_id=self._active_participant_id,
+                session_number=self._active_session_number,
+                phase_name=current.name.value,
+                ended_elapsed_sec=float(self.state.elapsed_seconds),
+            )
+            self._emit_trigger(
+                trigger_value=self.settings.trigger.phase_end_code,
+                annotation=f"phase_{current.name.value}_end",
+            )
+        except ValueError:
+            return
+
+    def _finalize_session_meta(self) -> None:
+        if self._active_participant_id is None or self._active_session_number is None:
+            return
+        self.session_manager.finalize_session(
+            participant_id=self._active_participant_id,
+            session_number=self._active_session_number,
+            clock_sync={},
+        )
+
+    def _setup_trigger_dispatcher(self, participant_id: str, session_number: int) -> None:
+        session_dir = self.session_manager.get_session_dir(participant_id, session_number)
+        trigger_logger = TriggerLogger(session_dir / "trigger_log.csv")
+
+        devices: list[TriggerDevice] = []
+
+        actichamp = ActiChampTrigger(
+            port=self.settings.actichamp.serial_port,
+            baudrate=self.settings.actichamp.serial_baudrate,
+            enabled=self.settings.actichamp.enabled,
+        )
+        if actichamp.connect():
+            devices.append(actichamp)
+
+        cognionics = CognionicsTrigger(
+            zmq_address=self.settings.cognionics.zmq_address,
+            serial_port=self.settings.cognionics.serial_port,
+            serial_baudrate=self.settings.cognionics.serial_baudrate,
+            enabled=self.settings.cognionics.enabled,
+        )
+        if cognionics.connect():
+            devices.append(cognionics)
+
+        lsl = LSLTrigger(
+            stream_name=self.settings.lsl.stream_name,
+            source_id=self.settings.lsl.source_id,
+            enabled=self.settings.lsl.enabled,
+        )
+        devices.append(lsl)
+
+        self._trigger_dispatcher = TriggerDispatcher(devices=devices, logger=trigger_logger)
+
+    def _emit_trigger(self, trigger_value: int, annotation: str) -> None:
+        if self._trigger_dispatcher is None:
+            return
+        system_time_ns = time.time_ns()
+        asyncio.run(
+            self._trigger_dispatcher.send_all(
+                trigger_value=trigger_value,
+                annotation=annotation,
+                system_time_ns=system_time_ns,
+                reset_pulse_seconds=self.settings.trigger.reset_pulse_seconds,
+            )
+        )
 
     def _refresh_view(self) -> None:
         if not self._phase_plan:
